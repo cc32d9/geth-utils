@@ -1,0 +1,66 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+use JSON;
+use LWP::UserAgent;
+use Sys::Syslog qw(:standard :macros);
+
+
+my $critical = 60;
+
+my $srv_addr = $ENV{'HAPROXY_SERVER_ADDR'};
+bailout('Environment variable missing', 'HAPROXY_SERVER_ADDR') unless defined($srv_addr);
+
+my $srv_port = $ENV{'HAPROXY_SERVER_PORT'};
+bailout('Environment variable missing', 'HAPROXY_SERVER_PORT') unless defined($srv_port);
+
+my $ua = LWP::UserAgent->new(ssl_opts => { verify_hostname => 0 });
+$ua->timeout(10);
+$ua->env_proxy();
+
+my $url = 'http://' . $srv_addr . ':' . $srv_port;
+
+my $req = HTTP::Request->new( 'POST', $url );
+$req->header( 'Content-Type' => 'application/json' );
+
+$req->content( encode_json({jsonrpc => '2.0',
+                            id      => 1,
+                            method  => 'eth_getBlockByNumber',
+                            params  => ['latest', JSON->boolean(0)]}) );
+
+my $res =  $ua->request($req);
+if( not $res->is_success )
+{
+    bailout('HTTP error', $res->decoded_content);
+}
+
+my $content = $res->decoded_content;
+my $result = eval { decode_json($content) };
+bailout('JSON parsing error', $@) if $@;
+
+if( defined($result->{'error'}) )
+{
+    bailout('RPC error', $result->{'error'}{'message'});
+}
+
+my $timestamp = $result->{'result'}{'timestamp'};
+bailout('Error', 'Cannot find timestamp in the responce') unless defined($timestamp);
+
+my $diff = time() - hex($timestamp);
+if( $diff > $critical )
+{
+    bailout('Error', 'Latest block is ' . $diff . ' seconds old at ' . $url);
+}
+
+exit(0);
+
+sub bailout
+{
+    my ($error, $msg) = @_;
+    openlog($0, 'ndelay', 'LOG_USER');
+    syslog(LOG_CRIT, '%s: %s', $error, $msg);
+    closelog();
+    exit(1);
+}
