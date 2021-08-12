@@ -8,7 +8,7 @@ use LWP::UserAgent;
 use Sys::Syslog qw(:standard :macros);
 
 
-my $critical = 60;
+my $critical = 150;
 
 my $srv_addr = $ENV{'HAPROXY_SERVER_ADDR'};
 bailout('Environment variable missing', 'HAPROXY_SERVER_ADDR') unless defined($srv_addr);
